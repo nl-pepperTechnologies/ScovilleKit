@@ -33,14 +33,13 @@ public enum Scoville {
             }
         }
 
-    // MARK: - Event Tracking
     public static func track(_ event: AnalyticsEventName, parameters: [String: Any] = [:]) {
         guard let config = configuration else {
             logger.log("⚠️ Scoville not configured yet — call configure(apiKey:) first.")
             return
         }
 
-        let eventName = event.rawValue  // capture only the string (Sendable)
+        let eventName = event.rawValue
         let payload = EventPayload(
             uuid: config.uuid,
             eventName: eventName,
@@ -55,13 +54,19 @@ public enum Scoville {
             apiKey: config.apiKey,
             body: payload
         ) { result in
-            // hop back to main actor for logging
             Task { @MainActor in
                 switch result {
                 case .success:
                     logger.log("📊 Event '\(eventName)' tracked successfully.")
                 case .failure(let error):
-                    logger.log("❌ Failed to track '\(eventName)': \(error.localizedDescription)")
+                    // Grab current base URL from the network actor for better diagnostics
+                    let base = await ScovilleNetwork.shared.getCurrentBaseURL()
+                    logger.log("""
+                    ❌ Failed to track '\(eventName)'
+                    ├─ URL: \(base.appendingPathComponent("v2/analytics/track"))
+                    ├─ Error: \(error.localizedDescription)
+                    └─ Details: \(error)
+                    """)
                 }
             }
         }
