@@ -96,4 +96,47 @@ actor ScovilleNetwork {
             completion(result)
         }
     }
+    
+    /// Performs a GET request to the given endpoint.
+    /// e.g. `v2/heartbeat` or `v2/apps`
+    func get(
+        endpoint: String,
+        apiKey: String
+    ) async -> Result<Data, Error> {
+        let trimmedEndpoint = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
+        let url = currentURL.appendingPathComponent(trimmedEndpoint)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "X-App-Key")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+                #if DEBUG
+                print("[ScovilleKit] ❌ GET \(url.absoluteString)")
+                print("[ScovilleKit] Response: \(response)")
+                if let http = response as? HTTPURLResponse {
+                    print("[ScovilleKit] Status code: \(http.statusCode)")
+                }
+                #endif
+                return .failure(NetworkError.invalidResponse)
+            }
+            return .success(data)
+        } catch {
+            return .failure(NetworkError.requestFailed(error))
+        }
+    }
+
+    /// Completion-based convenience wrapper for GET requests.
+    nonisolated func get(
+        endpoint: String,
+        apiKey: String,
+        completion: @escaping @Sendable (Result<Data, Error>) -> Void
+    ) {
+        Task {
+            let result = await ScovilleNetwork.shared.get(endpoint: endpoint, apiKey: apiKey)
+            completion(result)
+        }
+    }
 }

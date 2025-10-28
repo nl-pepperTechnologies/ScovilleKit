@@ -165,19 +165,19 @@ public enum Scoville {
 
         // Perform request
         return Task {
-            await ScovilleNetwork.shared.post(
+            ScovilleNetwork.shared.get(
                 endpoint: "/v2/heartbeat",
-                apiKey: config.apiKey,
-                body: payload
+                apiKey: config.apiKey
             ) { result in
                 Task { @MainActor in
                     switch result {
-                    case .success:
+                    case .success(let data):
                         print("[ScovilleKit] ✅ Heartbeat successful — configuration and network OK.")
-                        completion(.success(()))
+                        if let json = String(data: data, encoding: .utf8) {
+                            print("[ScovilleKit] Response: \(json)")
+                        }
                     case .failure(let error):
                         print("[ScovilleKit] ❌ Heartbeat failed: \(error.localizedDescription) (\(error))")
-                        completion(.failure(error))
                     }
                 }
             }
