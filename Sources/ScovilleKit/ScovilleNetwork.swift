@@ -57,6 +57,8 @@ actor ScovilleNetwork {
     ) async -> Result<Void, Error> {
         let trimmedEndpoint = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
         let url = currentURL.appendingPathComponent(trimmedEndpoint)
+        
+        print("[ScovilleKit] \(url)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -73,10 +75,16 @@ actor ScovilleNetwork {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                 #if DEBUG
-                print("[ScovilleKit] \(response)")
+                print("[ScovilleKit] fail \(response)")
                 #endif
                 return .failure(NetworkError.invalidResponse)
             }
+            
+                        
+            #if DEBUG
+            print("[ScovilleKit] OK \(response)")
+            #endif
+            
             return .success(())
         } catch {
             return .failure(NetworkError.requestFailed(error))
