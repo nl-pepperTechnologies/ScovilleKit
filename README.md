@@ -1,91 +1,159 @@
-# 🔥 ScovilleKit
-**Lightweight analytics & device registration framework for Pepper Technologies apps**
 
-## 🌶 Overview
-ScovilleKit is a Swift package developed by **Pepper Technologies** for unified app analytics and device management across multiple iOS and Android apps.
-It provides automatic app metadata, event tracking, and secure device registration with your Laravel-based backend (https://pixelwonders.nl/api).
+# 📊 ScovilleKit — Developer README
 
-## ✨ Features
-- ✅ Persistent device UUID per app
-- ✅ Automatic app version / build / bundle ID tracking
-- ✅ One-line analytics tracking (`Scoville.track("AppOpened")`)
-- ✅ Secure event transport via X-App-Key
-- ✅ Device registration with push token (for notifications)
-- ✅ Works both locally and in production
-- ✅ Extensible architecture for future features (batching, sessions, offline queue)
+ScovilleKit is a lightweight analytics SDK for iOS apps by Pepper Technologies.
+It offers **event tracking**, **device registration**, and **simple API configuration** for the Scoville backend.
 
-## 🧱 Installation
-### Swift Package Manager
-1. In Xcode, go to **File → Add Packages**
-2. Enter repository URL:
-   ```
-   git@github.com:nl-pepperTechnologies/ScovilleKit.git
-   ```
-3. Choose **Exact Version** and select the latest tag (e.g., `1.0.0`)
-4. Import:
-   ```swift
-   import ScovilleKit
-   ```
+---
+
+## 🔧 Installation
+
+### Swift Package Manager (recommended)
+1. In Xcode: **File → Add Packages…**
+2. Enter the repo URL (or add the local package).
+3. Add **ScovilleKit** to your app target.
+
+### Manual
+Drag the `ScovilleKit` sources into your app target.
+
+---
 
 ## 🚀 Quick Start
-### 1. Configure Scoville at app launch
+
+Initialize once at launch (e.g., in your `@main` App init or `application(_:didFinishLaunchingWithOptions:)`).
+
 ```swift
-import SwiftUI
 import ScovilleKit
 
 @main
-struct KentekenScannerApp: App {
+struct MyApp: App {
     init() {
-        Scoville.configure(apiKey: "YOUR_APP_API_KEY")
+        Scoville.configure(apiKey: "YOUR_API_KEY")
+        Scoville.configureAPI(url: "https://your-api-endpoint.com")
     }
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
+        WindowGroup { ContentView() }
     }
 }
 ```
-Automatically:
-- Stores persistent UUID
-- Captures bundle ID, app version & build
-- Sends first launch event (`AppOpened`)
 
-### 2. Track custom events
+### Register the device (when you receive your APNs token)
 ```swift
-Scoville.track("LicensePlateSearch", parameters: [
-    "query": "KZ-123-X",
-    "success": true
+Scoville.registerDevice(token: apnsTokenString)
+```
+
+### Track events
+```swift
+// Predefined event
+Scoville.track(.appOpened)
+
+// Custom event
+Scoville.track("CustomEvent", parameters: [
+    "foo": "bar",
+    "value": 123,
+    "premium": true,
+    "ratio": 0.42
 ])
 ```
 
-### 3. Register device for push notifications
+**Supported parameter types:** `String`, `Int`, `Double`, `Bool` (via `AnalyticsValue`).
+
+---
+
+## 🧩 Project Structure (Files Overview)
+
+- **Scoville.swift** — Public API. Holds configuration (API key, bundle ID, version/build, persistent UUID), event tracking, device registration, and debug logging. Runs network calls via `ScovilleNetwork` using Swift Concurrency friendly patterns.
+- **ScovilleKit.swift** — Module entry file (export surface).
+- **ScovilleNetwork.swift** — Thin HTTP client with configurable base URL. Provides `post(endpoint:apiKey:body:completion:)` used by tracking + registration. Configure via `Scoville.configureAPI(url:)`.
+- **ScovilleLogger.swift** — Minimal console logger (debug-level printing).
+- **EventPayload.swift** — `Codable & Sendable` payload for `/v2/analytics/track`. Includes `uuid`, `eventName`, `parameters`, `bundleId`, `version`, and `build`.
+- **DevicePayload.swift** — `Codable & Sendable` payload for `/v2/devices/register`. Includes `uuid`, `token`, `platform`, `version`, `build`, `bundleId`.
+- **AnalyticsValue.swift** — Type-safe wrapper for parameter values (string, int, double, bool). Fully `Codable & Sendable`.
+- **AnalyticsEventName.swift** — Enum of common event names. You can add your own cases or pass raw strings via `Scoville.track(_ eventName:String, ...)`.
+- **Bundle+Info.swift** — Helper to extract `bundleId`, `version`, `build` from `Bundle.main`.
+
+> If you previously used `AnyCodable`, the SDK now uses `AnalyticsValue` for **strict Sendable safety** under Swift 6 / strict concurrency.
+
+---
+
+## 🌐 Networking
+
+- **Base URL**: configure at launch with `Scoville.configureAPI(url:)`.
+- **Endpoints**:
+  - `POST /v2/analytics/track` — body: `EventPayload`
+  - `POST /v2/devices/register` — body: `DevicePayload`
+- **Auth**: Uses your `apiKey` via `Authorization: Bearer <key>` or as implemented in `ScovilleNetwork`.
+
+> Calls are asynchronous and log success/failure through `ScovilleLogger`.
+
+---
+
+## 🧠 Concurrency & Sendable
+
+- The SDK is safe to use with Swift Concurrency.
+- `EventPayload`, `DevicePayload`, and `AnalyticsValue` conform to `Sendable`.
+- Public API methods that hop across threads use `Task {}` but log on the main actor for UI-friendly output.
+
+---
+
+## 🧪 Testing Tips
+
+Example unit tests (pseudo):
 ```swift
-func application(_ application: UIApplication,
-                 didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-    Scoville.registerDevice(pushToken: deviceToken)
+func testConfigurationStoresApiKey() {
+    Scoville.configure(apiKey: "TEST_KEY")
+    // If no crash and no missing config warnings, OK
+    XCTAssertTrue(true)
+}
+
+func testTrackEventDoesNotCrash() {
+    Scoville.configure(apiKey: "TEST_KEY")
+    Scoville.track("TestEvent", parameters: ["foo": "bar", "n": 1])
+    XCTAssertTrue(true)
 }
 ```
+Consider stubbing `ScovilleNetwork` for deterministic tests.
 
-## 🧠 Architecture Overview
-1. **App Launch →** `Scoville.configure()`
-2. **User Actions →** `Scoville.track(event)`
-3. **Push Token Granted →** `Scoville.registerDevice()`
-4. **Admin App →** Reads data from `/v2/analytics/...`
+---
 
-## 🧩 Backend Endpoints
-| Endpoint | Purpose | Method | Auth |
-|-----------|----------|--------|------|
-| `/api/v2/analytics/track` | Send events | POST | X-App-Key |
-| `/api/v2/devices/register` | Register device | POST | X-App-Key |
+## 🗺️ Usage Patterns & Best Practices
 
-## ⚠️ Notes
-- Call `Scoville.configure()` before any tracking.
-- API key authenticates your app to the backend.
-- Local builds use your LAN IP.
-- Only anonymized data is collected.
+- **Initialize early** (on app start).
+- **Register device** whenever the push token changes.
+- **Use enums** for common events (`AnalyticsEventName`) and freeform strings for ad-hoc analytics.
+- **Keep parameters primitive** (String/Int/Double/Bool). If you need arrays or nested objects later, extend `AnalyticsValue` accordingly.
+- **Avoid UI work in callbacks** — the SDK already marshals logging to the MainActor.
 
-## 🧑‍💻 Maintained by
-**Pepper Technologies**
-🇳🇱 Eindhoven, The Netherlands
-https://peppertechnologies.nl
+---
+
+## 🔁 Migration (from `AnyCodable` to `AnalyticsValue`)
+
+Before:
+```swift
+Scoville.track("MyEvent", parameters: ["any": AnyCodable(something)])
+```
+After (compile-time safe):
+```swift
+Scoville.track("MyEvent", parameters: ["flag": true, "name": "abc", "count": 3])
+```
+
+---
+
+## 🧰 Troubleshooting
+
+- **“Scoville not configured yet”** → Ensure `Scoville.configure(apiKey:)` is called before any tracking or registration.
+- **Network errors** → Check `configureAPI(url:)`, connectivity, and API key validity.
+- **Missing events on server** → Confirm endpoint paths (`/v2/analytics/track`, `/v2/devices/register`) and inspect logs from `ScovilleLogger`.
+
+---
+
+## 📝 License
+
+© 2025 Pepper Technologies. All rights reserved. (Replace with your preferred license.)
+
+---
+
+## 👤 Maintainer
+
+Built by **Menno Spijker** · Pepper Technologies

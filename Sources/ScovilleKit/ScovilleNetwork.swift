@@ -14,21 +14,42 @@ actor ScovilleNetwork {
     private init() {}
 
     private let baseURL = URL(string: "https://pixelwonders.nl/api")!
+    private var customURL: URL?
+
+    private var currentURL: URL {
+        customURL ?? baseURL
+    }
+
+    func configureBaseURL(url: String) {
+        if let parsed = URL(string: url) {
+            customURL = parsed
+            print("🌐 [ScovilleNetwork] Custom API URL set to \(parsed)")
+        } else {
+            customURL = nil
+            print("⚠️ [ScovilleNetwork] Invalid URL string, reverting to default.")
+        }
+    }
+
+    func configureBaseURL(url: URL) {
+        customURL = url
+        print("🌐 [ScovilleNetwork] Custom API URL set to \(url)")
+    }
 
     enum NetworkError: Error {
         case invalidResponse
         case requestFailed(Error)
     }
 
-    /// Performs a POST request to the given endpoint.
-    /// e.g. `/v2/analytics/track` or `/v2/devices/register`
-    nonisolated func post<T: Encodable>(
+    /// Performs a POST request to the given endpoint (async/await version).
+    /// e.g. `v2/analytics/track` or `v2/devices/register` (leading slash optional)
+    func post<T: Encodable & Sendable>(
         endpoint: String,
         apiKey: String,
-        body: T,
-        completion: @escaping @Sendable (Result<Void, Error>) -> Void
-    ) {
-        let url = baseURL.appendingPathComponent(endpoint)
+        body: T
+    ) async -> Result<Void, Error> {
+        let trimmedEndpoint = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
+        let url = currentURL.appendingPathComponent(trimmedEndpoint)
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(apiKey, forHTTPHeaderField: "X-App-Key")
@@ -37,24 +58,31 @@ actor ScovilleNetwork {
         do {
             request.httpBody = try JSONEncoder().encode(body)
         } catch {
-            completion(.failure(error))
-            return
+            return .failure(error)
         }
 
-        // URLSession is thread-safe and not actor-isolated.
-        // Mark this method `nonisolated` so it can be called from @MainActor Scoville.
-        URLSession.shared.dataTask(with: request) { _, response, error in
-            if let error = error {
-                completion(.failure(NetworkError.requestFailed(error)))
-                return
-            }
-
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-                completion(.failure(NetworkError.invalidResponse))
-                return
+                return .failure(NetworkError.invalidResponse)
             }
+            return .success(())
+        } catch {
+            return .failure(NetworkError.requestFailed(error))
+        }
+    }
 
-            completion(.success(()))
-        }.resume()
+    /// Completion-based convenience wrapper for non-async callers.
+    /// This version avoids data race warnings by ensuring Sendable isolation.
+    nonisolated func post<T: Encodable & Sendable>(
+        endpoint: String,
+        apiKey: String,
+        body: T,
+        completion: @escaping @Sendable (Result<Void, Error>) -> Void
+    ) {
+        Task {
+            let result = await ScovilleNetwork.shared.post(endpoint: endpoint, apiKey: apiKey, body: body)
+            completion(result)
+        }
     }
 }

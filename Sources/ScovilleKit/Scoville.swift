@@ -26,6 +26,12 @@ public enum Scoville {
 
         logger.log("✅ Scoville configured for \(info.bundleId) — version \(info.version) (\(info.build))")
     }
+    
+    public static func configureAPI(url: String) {
+            Task {
+                await ScovilleNetwork.shared.configureBaseURL(url: url)
+            }
+        }
 
     // MARK: - Event Tracking
     public static func track(_ event: AnalyticsEventName, parameters: [String: Any] = [:]) {
