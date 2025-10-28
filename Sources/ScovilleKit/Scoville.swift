@@ -35,7 +35,7 @@ public enum Scoville {
 
     public static func track(_ event: AnalyticsEventName, parameters: [String: Any] = [:]) {
         guard let config = configuration else {
-            logger.log("⚠️ Scoville not configured yet — call configure(apiKey:) first.")
+            logger.log("⚠️ Scoville not configured yet — call configure(apiKey:) first. (tried logging: \(event))")
             return
         }
 
