@@ -7,14 +7,24 @@
 
 import Foundation
 
-/// Handles all outbound API calls.
-/// Actor-isolated to ensure thread-safe access to the shared instance.
 actor ScovilleNetwork {
     static let shared = ScovilleNetwork()
     private init() {}
 
     private let baseURL = URL(string: "https://pixelwonders.nl/api")!
     private var customURL: URL?
+
+    // MARK: - Ephemeral Session (no cookies, no caching)
+    private lazy var session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieAcceptPolicy = .never
+        config.httpCookieStorage = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config, delegate: RedirectBlocker(), delegateQueue: nil)
+    }()
 
     private var currentURL: URL {
         customURL ?? baseURL
@@ -25,9 +35,9 @@ actor ScovilleNetwork {
     }
 
     func currentBaseURL() -> URL {
-        return currentURL
+        currentURL
     }
-    
+
     func configureBaseURL(url: String) {
         if let parsed = URL(string: url) {
             customURL = parsed
@@ -48,17 +58,14 @@ actor ScovilleNetwork {
         case requestFailed(Error)
     }
 
-    /// Performs a POST request to the given endpoint (async/await version).
-    /// e.g. `v2/analytics/track` or `v2/devices/register` (leading slash optional)
+    // MARK: - POST
     func post<T: Encodable & Sendable>(
         endpoint: String,
         apiKey: String,
         body: T
     ) async -> Result<Void, Error> {
-        let trimmedEndpoint = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
-        let url = currentURL.appendingPathComponent(trimmedEndpoint)
-        
-        print("[ScovilleKit] \(url)")
+        let trimmed = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
+        let url = currentURL.appendingPathComponent(trimmed)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -72,27 +79,22 @@ actor ScovilleNetwork {
         }
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                 #if DEBUG
-                print("[ScovilleKit] fail \(response)")
+                print("[ScovilleKit] ❌ POST failed (\((response as? HTTPURLResponse)?.statusCode ?? 0)) → \(url)")
                 #endif
                 return .failure(NetworkError.invalidResponse)
             }
-            
-                        
             #if DEBUG
-            print("[ScovilleKit] OK \(response)")
+            print("[ScovilleKit] ✅ POST OK → \(url)")
             #endif
-            
             return .success(())
         } catch {
             return .failure(NetworkError.requestFailed(error))
         }
     }
 
-    /// Completion-based convenience wrapper for non-async callers.
-    /// This version avoids data race warnings by ensuring Sendable isolation.
     nonisolated func post<T: Encodable & Sendable>(
         endpoint: String,
         apiKey: String,
@@ -104,29 +106,24 @@ actor ScovilleNetwork {
             completion(result)
         }
     }
-    
-    /// Performs a GET request to the given endpoint.
-    /// e.g. `v2/heartbeat` or `v2/apps`
+
+    // MARK: - GET
     func get(
         endpoint: String,
         apiKey: String
     ) async -> Result<Data, Error> {
-        let trimmedEndpoint = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
-        let url = currentURL.appendingPathComponent(trimmedEndpoint)
+        let trimmed = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
+        let url = currentURL.appendingPathComponent(trimmed)
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue(apiKey, forHTTPHeaderField: "X-App-Key")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
                 #if DEBUG
-                print("[ScovilleKit] ❌ GET \(url.absoluteString)")
-                print("[ScovilleKit] Response: \(response)")
-                if let http = response as? HTTPURLResponse {
-                    print("[ScovilleKit] Status code: \(http.statusCode)")
-                }
+                print("[ScovilleKit] ❌ GET failed (\((response as? HTTPURLResponse)?.statusCode ?? 0)) → \(url)")
                 #endif
                 return .failure(NetworkError.invalidResponse)
             }
@@ -136,7 +133,6 @@ actor ScovilleNetwork {
         }
     }
 
-    /// Completion-based convenience wrapper for GET requests.
     nonisolated func get(
         endpoint: String,
         apiKey: String,
@@ -146,5 +142,19 @@ actor ScovilleNetwork {
             let result = await ScovilleNetwork.shared.get(endpoint: endpoint, apiKey: apiKey)
             completion(result)
         }
+    }
+}
+
+// MARK: - Redirect Blocker
+private final class RedirectBlocker: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        // Stop auto-following 302 → surfaces actual Laravel redirect in logs
+        completionHandler(nil)
     }
 }
