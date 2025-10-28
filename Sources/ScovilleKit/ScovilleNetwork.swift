@@ -20,19 +20,27 @@ actor ScovilleNetwork {
         customURL ?? baseURL
     }
 
+    nonisolated func getCurrentBaseURL() async -> URL {
+        await ScovilleNetwork.shared.currentBaseURL()
+    }
+
+    func currentBaseURL() -> URL {
+        return currentURL
+    }
+    
     func configureBaseURL(url: String) {
         if let parsed = URL(string: url) {
             customURL = parsed
-            print("🌐 [ScovilleNetwork] Custom API URL set to \(parsed)")
+            print("🌐 [ScovilleKit] Custom API URL set to \(parsed)")
         } else {
             customURL = nil
-            print("⚠️ [ScovilleNetwork] Invalid URL string, reverting to default.")
+            print("⚠️ [ScovilleKit] Invalid URL string, reverting to default.")
         }
     }
 
     func configureBaseURL(url: URL) {
         customURL = url
-        print("🌐 [ScovilleNetwork] Custom API URL set to \(url)")
+        print("🌐 [ScovilleKit] Custom API URL set to \(url)")
     }
 
     enum NetworkError: Error {

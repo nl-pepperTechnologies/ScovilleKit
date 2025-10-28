@@ -105,15 +105,76 @@ public enum Scoville {
 
     // MARK: - Debug
     public static func debugPrintStatus() {
-        if let config = configuration {
-            logger.log("""
-            🧠 ScovilleKit Status:
-            UUID: \(config.uuid)
-            App: \(config.bundleId)
-            Version: \(config.version) (\(config.build))
+        let prefix = "[ScovilleKit]"
+
+        guard let config = configuration else {
+            print("\(prefix) ⚠️ Not configured — call Scoville.configure(apiKey:) first.")
+            return
+        }
+
+        // Fetch current API URL (using the actor)
+        Task {
+            let base = await ScovilleNetwork.shared.getCurrentBaseURL()
+
+            print("""
+            \(prefix) 🧠 Status Report
+            \(prefix) ├─ App: \(config.bundleId)
+            \(prefix) ├─ Version: \(config.version) (\(config.build))
+            \(prefix) ├─ UUID: \(config.uuid)
+            \(prefix) └─ API Base URL: \(base.absoluteString)
             """)
-        } else {
-            logger.log("⚠️ ScovilleKit not configured.")
+        }
+    }
+    
+    // MARK: - Diagnostics
+    @discardableResult
+    public static func testHeartbeat(
+        completion: @escaping @Sendable (Result<Void, Error>) -> Void
+    ) -> Task<Void, Never> {
+        guard let config = configuration else {
+            print("[ScovilleKit] ⚠️ Cannot send heartbeat — not configured.")
+            completion(.failure(NSError(
+                domain: "ScovilleKit",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "ScovilleKit not configured"]
+            )))
+            return Task {}
+        }
+
+        print("[ScovilleKit] 💓 Sending heartbeat to /v2/heartbeat …")
+
+        struct HeartbeatPayload: Codable, Sendable {
+            let uuid: String
+            let bundleId: String
+            let version: String
+            let build: String
+        }
+
+        let payload = HeartbeatPayload(
+            uuid: config.uuid,
+            bundleId: config.bundleId,
+            version: config.version,
+            build: config.build
+        )
+
+        // Perform request
+        return Task {
+            await ScovilleNetwork.shared.post(
+                endpoint: "/v2/heartbeat",
+                apiKey: config.apiKey,
+                body: payload
+            ) { result in
+                Task { @MainActor in
+                    switch result {
+                    case .success:
+                        print("[ScovilleKit] ✅ Heartbeat successful — configuration and network OK.")
+                        completion(.success(()))
+                    case .failure(let error):
+                        print("[ScovilleKit] ❌ Heartbeat failed: \(error.localizedDescription) (\(error))")
+                        completion(.failure(error))
+                    }
+                }
+            }
         }
     }
 }
