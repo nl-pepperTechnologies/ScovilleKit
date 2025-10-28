@@ -65,6 +65,7 @@ public enum Scoville {
                     ❌ Failed to track '\(eventName)'
                     ├─ URL: \(base.appendingPathComponent("v2/analytics/track"))
                     ├─ Error: \(error.localizedDescription)
+                    ├─ Payload: \(payload)
                     └─ Details: \(error)
                     """)
                 }
