@@ -87,7 +87,7 @@ public enum Scoville {
     public static func registerDevice(token: String?) {
         guard let config = configuration else {
             Task {
-                await ScovilleLogger.shared.warning(.configuration, "Scoville not configured yet — call configure(apiKey:) first.")
+                await ScovilleLogger.shared.warning(.configuration, "Scoville not configured yet — call configure(apiKey:) first. Device Registration failed..")
             }
             return
         }
