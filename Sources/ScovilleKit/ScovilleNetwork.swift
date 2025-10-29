@@ -62,6 +62,10 @@ actor ScovilleNetwork {
 
         let trimmed = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
         let url = currentURL.appendingPathComponent(trimmed)
+        
+        await ScovilleLogger.shared.log(.device, "baseURL: \(baseURL)")
+        await ScovilleLogger.shared.log(.device, "customURL: \(customURL)")
+        await ScovilleLogger.shared.log(.device, "request url: \(url.absoluteString)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
