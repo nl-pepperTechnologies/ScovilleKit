@@ -8,9 +8,9 @@
 import Foundation
 
 /// Payload for `/v2/devices/register`
-struct DevicePayload: Codable {
+struct DevicePayload: Codable, Sendable {
     let uuid: String
-    let token: String
+    let token: String?   // ✅ Optional to support devices without APNs token
     let platform: String
     let version: String
     let build: String

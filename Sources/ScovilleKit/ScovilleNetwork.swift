@@ -14,7 +14,7 @@ actor ScovilleNetwork {
     private let baseURL = URL(string: "https://pixelwonders.nl/api")!
     private var customURL: URL?
 
-    // MARK: - Ephemeral Session (no cookies, no caching)
+    // MARK: - Ephemeral session (no cookies, no caching)
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.httpShouldSetCookies = false
@@ -26,9 +26,7 @@ actor ScovilleNetwork {
         return URLSession(configuration: config, delegate: RedirectBlocker(), delegateQueue: nil)
     }()
 
-    private var currentURL: URL {
-        customURL ?? baseURL
-    }
+    private var currentURL: URL { customURL ?? baseURL }
 
     nonisolated func getCurrentBaseURL() async -> URL {
         await ScovilleNetwork.shared.currentBaseURL()
@@ -38,23 +36,19 @@ actor ScovilleNetwork {
         currentURL
     }
 
-    func configureBaseURL(url: String) {
+    // MARK: - Base URL Configuration
+    func configureBaseURL(url: String) async {
         if let parsed = URL(string: url) {
             customURL = parsed
-            print("🌐 [ScovilleKit] Custom API URL set to \(parsed)")
+            await ScovilleLogger.shared.success(.network, "Custom API URL set to \(parsed)")
         } else {
             customURL = nil
-            print("⚠️ [ScovilleKit] Invalid URL string, reverting to default.")
+            await ScovilleLogger.shared.warning(.network, "Invalid URL string provided — reverted to default base URL.")
         }
     }
 
-    func configureBaseURL(url: URL) {
-        customURL = url
-        print("🌐 [ScovilleKit] Custom API URL set to \(url)")
-    }
-
     enum NetworkError: Error {
-        case invalidResponse
+        case invalidResponse(Int)
         case requestFailed(Error)
     }
 
@@ -64,6 +58,8 @@ actor ScovilleNetwork {
         apiKey: String,
         body: T
     ) async -> Result<Void, Error> {
+        if Task.isCancelled { return .failure(CancellationError()) }
+
         let trimmed = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
         let url = currentURL.appendingPathComponent(trimmed)
 
@@ -75,35 +71,28 @@ actor ScovilleNetwork {
         do {
             request.httpBody = try JSONEncoder().encode(body)
         } catch {
+            await ScovilleLogger.shared.error(.network, "Failed to encode POST body for \(endpoint): \(error.localizedDescription)")
             return .failure(error)
         }
 
         do {
             let (_, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-                #if DEBUG
-                print("[ScovilleKit] ❌ POST failed (\((response as? HTTPURLResponse)?.statusCode ?? 0)) → \(url)")
-                #endif
-                return .failure(NetworkError.invalidResponse)
+            guard let http = response as? HTTPURLResponse else {
+                await ScovilleLogger.shared.error(.network, "POST → \(endpoint) invalid response type.")
+                return .failure(NetworkError.invalidResponse(-1))
             }
-            #if DEBUG
-            print("[ScovilleKit] ✅ POST OK → \(url)")
-            #endif
+
+            guard 200..<300 ~= http.statusCode else {
+                await ScovilleLogger.shared.error(.network, "POST → \(endpoint) failed (\(http.statusCode)) — \(url.absoluteString)")
+                return .failure(NetworkError.invalidResponse(http.statusCode))
+            }
+
+            await ScovilleLogger.shared.success(.network, "POST OK → \(url.absoluteString)")
             return .success(())
         } catch {
+            if Task.isCancelled { return .failure(CancellationError()) }
+            await ScovilleLogger.shared.error(.network, "POST request to \(endpoint) failed: \(error.localizedDescription)")
             return .failure(NetworkError.requestFailed(error))
-        }
-    }
-
-    nonisolated func post<T: Encodable & Sendable>(
-        endpoint: String,
-        apiKey: String,
-        body: T,
-        completion: @escaping @Sendable (Result<Void, Error>) -> Void
-    ) {
-        Task {
-            let result = await ScovilleNetwork.shared.post(endpoint: endpoint, apiKey: apiKey, body: body)
-            completion(result)
         }
     }
 
@@ -112,6 +101,8 @@ actor ScovilleNetwork {
         endpoint: String,
         apiKey: String
     ) async -> Result<Data, Error> {
+        if Task.isCancelled { return .failure(CancellationError()) }
+
         let trimmed = endpoint.hasPrefix("/") ? String(endpoint.dropFirst()) : endpoint
         let url = currentURL.appendingPathComponent(trimmed)
 
@@ -121,26 +112,22 @@ actor ScovilleNetwork {
 
         do {
             let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-                #if DEBUG
-                print("[ScovilleKit] ❌ GET failed (\((response as? HTTPURLResponse)?.statusCode ?? 0)) → \(url)")
-                #endif
-                return .failure(NetworkError.invalidResponse)
+            guard let http = response as? HTTPURLResponse else {
+                await ScovilleLogger.shared.error(.network, "GET → \(endpoint) invalid response type.")
+                return .failure(NetworkError.invalidResponse(-1))
             }
+
+            guard 200..<300 ~= http.statusCode else {
+                await ScovilleLogger.shared.error(.network, "GET → \(endpoint) failed (\(http.statusCode)) — \(url.absoluteString)")
+                return .failure(NetworkError.invalidResponse(http.statusCode))
+            }
+
+            await ScovilleLogger.shared.success(.network, "GET OK → \(url.absoluteString)")
             return .success(data)
         } catch {
+            if Task.isCancelled { return .failure(CancellationError()) }
+            await ScovilleLogger.shared.error(.network, "GET request to \(endpoint) failed: \(error.localizedDescription)")
             return .failure(NetworkError.requestFailed(error))
-        }
-    }
-
-    nonisolated func get(
-        endpoint: String,
-        apiKey: String,
-        completion: @escaping @Sendable (Result<Data, Error>) -> Void
-    ) {
-        Task {
-            let result = await ScovilleNetwork.shared.get(endpoint: endpoint, apiKey: apiKey)
-            completion(result)
         }
     }
 }
@@ -154,7 +141,9 @@ private final class RedirectBlocker: NSObject, URLSessionTaskDelegate {
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
-        // Stop auto-following 302 → surfaces actual Laravel redirect in logs
+        Task {
+            await ScovilleLogger.shared.warning(.network, "🚫 Blocked 302 redirect → \(response.url?.absoluteString ?? "unknown")")
+        }
         completionHandler(nil)
     }
 }

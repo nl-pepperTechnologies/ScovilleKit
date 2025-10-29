@@ -1,4 +1,3 @@
-
 # 📊 ScovilleKit — Developer README
 
 ScovilleKit is a lightweight analytics SDK for iOS apps by Pepper Technologies.

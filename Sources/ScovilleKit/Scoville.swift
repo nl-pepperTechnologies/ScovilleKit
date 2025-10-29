@@ -9,7 +9,6 @@ import Foundation
 public enum Scoville {
     private static var configuration: Configuration?
     private static let storage = ScovilleStorage()
-    private static let logger = ScovilleLogger()
 
     // MARK: - Initialization
     public static func configure(apiKey: String) {
@@ -24,18 +23,24 @@ public enum Scoville {
             uuid: uuid
         )
 
-        logger.log("✅ Scoville configured for \(info.bundleId) — version \(info.version) (\(info.build))")
-    }
-    
-    public static func configureAPI(url: String) {
-            Task {
-                await ScovilleNetwork.shared.configureBaseURL(url: url)
-            }
+        Task {
+            await ScovilleLogger.shared.success(.configuration, "Configured for \(info.bundleId) — version \(info.version) (\(info.build))")
         }
+    }
 
+    public static func configureAPI(url: String) {
+        Task {
+            await ScovilleNetwork.shared.configureBaseURL(url: url)
+            await ScovilleLogger.shared.log(.network, "Custom API base URL set to \(url)")
+        }
+    }
+
+    // MARK: - Event Tracking
     public static func track(_ event: AnalyticsEventName, parameters: [String: Any] = [:]) {
         guard let config = configuration else {
-            logger.log("⚠️ Scoville not configured yet — call configure(apiKey:) first. (tried logging: \(event))")
+            Task {
+                await ScovilleLogger.shared.warning(.configuration, "Scoville not configured yet — call configure(apiKey:) first. Tried logging: \(event.rawValue)")
+            }
             return
         }
 
@@ -49,26 +54,27 @@ public enum Scoville {
             build: config.build
         )
 
-        ScovilleNetwork.shared.post(
-            endpoint: "/v2/analytics/track",
-            apiKey: config.apiKey,
-            body: payload
-        ) { result in
-            Task { @MainActor in
-                switch result {
-                case .success:
-                    logger.log("📊 Event '\(eventName)' tracked successfully.")
-                case .failure(let error):
-                    // Grab current base URL from the network actor for better diagnostics
-                    let base = await ScovilleNetwork.shared.getCurrentBaseURL()
-                    logger.log("""
-                    ❌ Failed to track '\(eventName)'
-                    ├─ URL: \(base.appendingPathComponent("v2/analytics/track"))
-                    ├─ Error: \(error.localizedDescription)
-                    ├─ Payload: \(payload)
-                    └─ Details: \(error)
-                    """)
-                }
+        Task.detached {
+            guard !Task.isCancelled else { return }
+            let result = await ScovilleNetwork.shared.post(
+                endpoint: "/v2/analytics/track",
+                apiKey: config.apiKey,
+                body: payload
+            )
+
+            await ScovilleLogger.shared.log(.analytics, "Attempting to track event: \(eventName)")
+
+            switch result {
+            case .success:
+                await ScovilleLogger.shared.success(.analytics, "Event '\(eventName)' tracked successfully")
+            case .failure(let error):
+                let base = await ScovilleNetwork.shared.getCurrentBaseURL()
+                await ScovilleLogger.shared.error(.analytics, """
+                Failed to track '\(eventName)'
+                ├─ URL: \(base.appendingPathComponent("v2/analytics/track"))
+                ├─ Error: \(error.localizedDescription)
+                └─ Payload: \(payload)
+                """)
             }
         }
     }
@@ -78,67 +84,67 @@ public enum Scoville {
     }
 
     // MARK: - Device Registration
-    public static func registerDevice(token: String) {
+    public static func registerDevice(token: String?) {
         guard let config = configuration else {
-            logger.log("⚠️ Scoville not configured yet — call configure(apiKey:) first.")
+            Task {
+                await ScovilleLogger.shared.warning(.configuration, "Scoville not configured yet — call configure(apiKey:) first.")
+            }
             return
         }
 
         let payload = DevicePayload(
             uuid: config.uuid,
-            token: token,
+            token: token, // ✅ Optional
             platform: "ios",
             version: config.version,
             build: config.build,
             bundleId: config.bundleId
         )
 
-        ScovilleNetwork.shared.post(
-            endpoint: "/v2/devices/register",
-            apiKey: config.apiKey,
-            body: payload
-        ) { result in
-            Task { @MainActor in
-                switch result {
-                case .success:
-                    logger.log("📡 Device registered successfully.")
-                case .failure(let error):
-                    logger.log("❌ Device registration failed: \(error.localizedDescription)")
-                }
+        Task.detached {
+            let result = await ScovilleNetwork.shared.post(
+                endpoint: "/v2/devices/register",
+                apiKey: config.apiKey,
+                body: payload
+            )
+
+            switch result {
+            case .success:
+                await ScovilleLogger.shared.success(.device, "Device registered successfully")
+            case .failure(let error):
+                await ScovilleLogger.shared.error(.device, "Device registration failed: \(error.localizedDescription)")
             }
         }
     }
 
     // MARK: - Debug
     public static func debugPrintStatus() {
-        let prefix = "[ScovilleKit]"
-
         guard let config = configuration else {
-            print("\(prefix) ⚠️ Not configured — call Scoville.configure(apiKey:) first.")
+            print("[ScovilleKit][Config] ⚠️ Not configured — call Scoville.configure(apiKey:) first.")
             return
         }
 
-        // Fetch current API URL (using the actor)
         Task {
             let base = await ScovilleNetwork.shared.getCurrentBaseURL()
-
-            print("""
-            \(prefix) 🧠 Status Report
-            \(prefix) ├─ App: \(config.bundleId)
-            \(prefix) ├─ Version: \(config.version) (\(config.build))
-            \(prefix) ├─ UUID: \(config.uuid)
-            \(prefix) └─ API Base URL: \(base.absoluteString)
+            await ScovilleLogger.shared.log(.lifecycle, """
+            🧠 Status Report
+            ├─ App: \(config.bundleId)
+            ├─ Version: \(config.version) (\(config.build))
+            ├─ UUID: \(config.uuid)
+            └─ API Base URL: \(base.absoluteString)
             """)
         }
     }
-    
+
     // MARK: - Diagnostics
     @discardableResult
     public static func testHeartbeat(
         completion: @escaping @Sendable (Result<Void, Error>) -> Void
     ) -> Task<Void, Never> {
         guard let config = configuration else {
-            print("[ScovilleKit] ⚠️ Cannot send heartbeat — not configured.")
+            Task {
+                await ScovilleLogger.shared.warning(.configuration, "Cannot send heartbeat — not configured.")
+            }
             completion(.failure(NSError(
                 domain: "ScovilleKit",
                 code: -1,
@@ -147,39 +153,25 @@ public enum Scoville {
             return Task {}
         }
 
-        print("[ScovilleKit] 💓 Sending heartbeat to /v2/heartbeat …")
+        return Task.detached {
+            guard !Task.isCancelled else { return }
+            await ScovilleLogger.shared.log(.network, "💓 Sending heartbeat to /v2/heartbeat …")
 
-        struct HeartbeatPayload: Codable, Sendable {
-            let uuid: String
-            let bundleId: String
-            let version: String
-            let build: String
-        }
-
-        let payload = HeartbeatPayload(
-            uuid: config.uuid,
-            bundleId: config.bundleId,
-            version: config.version,
-            build: config.build
-        )
-
-        // Perform request
-        return Task {
-            ScovilleNetwork.shared.get(
+            let result = await ScovilleNetwork.shared.get(
                 endpoint: "/v2/heartbeat",
                 apiKey: config.apiKey
-            ) { result in
-                Task { @MainActor in
-                    switch result {
-                    case .success(let data):
-                        print("[ScovilleKit] ✅ Heartbeat successful — configuration and network OK.")
-                        if let json = String(data: data, encoding: .utf8) {
-                            print("[ScovilleKit] Response: \(json)")
-                        }
-                    case .failure(let error):
-                        print("[ScovilleKit] ❌ Heartbeat failed: \(error.localizedDescription) (\(error))")
-                    }
+            )
+
+            switch result {
+            case .success(let data):
+                await ScovilleLogger.shared.success(.network, "Heartbeat successful — configuration and network OK")
+                if let json = String(data: data, encoding: .utf8) {
+                    await ScovilleLogger.shared.log(.network, "Response: \(json)")
                 }
+                completion(.success(()))
+            case .failure(let error):
+                await ScovilleLogger.shared.error(.network, "Heartbeat failed: \(error.localizedDescription)")
+                completion(.failure(error))
             }
         }
     }
