@@ -14,5 +14,5 @@ struct DevicePayload: Codable, Sendable {
     let platform: String
     let version: String
     let build: String
-    let bundleId: String
+    let bundle_id: String
 }

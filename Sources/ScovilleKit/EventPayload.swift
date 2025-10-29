@@ -8,9 +8,9 @@ import Foundation
 /// Payload for `/v2/analytics/track`
 struct EventPayload: Codable, Sendable {
     let uuid: String
-    let eventName: String
+    let event_name: String
     let parameters: [String: AnalyticsValue]
-    let bundleId: String
+    let bundle_id: String
     let version: String
     let build: String
 
@@ -23,7 +23,7 @@ struct EventPayload: Codable, Sendable {
         build: String
     ) {
         self.uuid = uuid
-        self.eventName = eventName
+        self.event_name = eventName
         self.parameters = parameters.compactMapValues { value in
             switch value {
             case let v as String: return .string(v)
@@ -33,7 +33,7 @@ struct EventPayload: Codable, Sendable {
             default: return nil
             }
         }
-        self.bundleId = bundleId
+        self.bundle_id = bundleId
         self.version = version
         self.build = build
     }
