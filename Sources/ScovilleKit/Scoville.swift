@@ -84,10 +84,21 @@ public enum Scoville {
     }
 
     // MARK: - Device Registration
-    public static func registerDevice(token: String?) {
+    public static func registerDevice(
+        token: String?,
+        completion: (@Sendable (Result<Void, Error>) -> Void)? = nil
+    ) {
         guard let config = configuration else {
-            Task {
-                await ScovilleLogger.shared.warning(.configuration, "Scoville not configured yet — call configure(apiKey:) first. Device Registration failed..")
+            Task { @MainActor in
+                await ScovilleLogger.shared.warning(
+                    .configuration,
+                    "Scoville not configured yet — call configure(apiKey:) first. Device registration failed."
+                )
+                completion?(.failure(NSError(
+                    domain: "ScovilleKit",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Scoville not configured"]
+                )))
             }
             return
         }
@@ -101,18 +112,24 @@ public enum Scoville {
             bundle_id: config.bundleId
         )
 
-        Task.detached {
+        // Run on background thread
+        Task.detached(priority: .utility) {
             let result = await ScovilleNetwork.shared.post(
                 endpoint: "/v2/devices/register",
                 apiKey: config.apiKey,
                 body: payload
             )
 
-            switch result {
-            case .success:
-                await ScovilleLogger.shared.success(.device, "Device registered successfully")
-            case .failure(let error):
-                await ScovilleLogger.shared.error(.device, "Device registration failed: \(error.localizedDescription)")
+            // Hop back to main actor to log and call completion safely
+            await MainActor.run {
+                switch result {
+                case .success:
+                    Task { await ScovilleLogger.shared.success(.device, "Device registered successfully") }
+                    completion?(.success(()))
+                case .failure(let error):
+                    Task { await ScovilleLogger.shared.error(.device, "Device registration failed: \(error.localizedDescription)") }
+                    completion?(.failure(error))
+                }
             }
         }
     }
