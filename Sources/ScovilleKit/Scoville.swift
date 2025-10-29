@@ -98,7 +98,7 @@ public enum Scoville {
             platform: "ios",
             version: config.version,
             build: config.build,
-            bundleId: config.bundleId
+            bundle_id: config.bundleId
         )
 
         Task.detached {
